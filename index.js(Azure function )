@@ -1,0 +1,161 @@
+const { app } = require('@azure/functions');
+const sql = require('mssql');
+require('dotenv').config();
+
+app.http('ManageFeeDetails', {
+    methods: ['GET', 'PUT'],
+    authLevel: 'function',  // Set to 'function' for API key authentication
+    handler: async (request, context) => {
+        const method = request.method;
+
+        // Retrieve the StudentID either from query string or body
+        const StudentID = request.query.get('StudentID') || (request.body && request.body.StudentID);
+
+        if (!StudentID) {
+            context.log('No StudentID provided.');
+            return {
+                status: 400,
+                body: "Please pass a valid StudentID in the query string or request body."
+            };
+        }
+
+        context.log(`Received ${method} request for StudentID:`, StudentID);
+
+        let pool;
+        try {
+            // Connect to the database
+            context.log('Connecting to the database...');
+            pool = await sql.connect({
+                user: process.env.DB_USER,
+                password: process.env.DB_PASSWORD,
+                server: process.env.DB_SERVER,
+                database: process.env.DB_NAME,
+                options: {
+                    encrypt: true,
+                    enableArithAbort: true
+                }
+            });
+            context.log('Database connected successfully.');
+
+            // Handle GET request: Retrieve fee details for the StudentID
+            if (method === 'GET') {
+                const requestSql = new sql.Request(pool);
+                requestSql.input('StudentID', sql.Int, StudentID);
+                const query = `
+                    SELECT StudentID, Name, Course, TotalFee, PaidAmount, DueDate, Email 
+                    FROM Students 
+                    WHERE StudentID = @StudentID
+                `;
+                context.log('Executing query:', query);
+                const result = await requestSql.query(query);
+
+                if (result.recordset.length === 0) {
+                    context.log('No records found for StudentID:', StudentID);
+                    return {
+                        status: 404,
+                        body: "No records found for the given StudentID."
+                    };
+                }
+
+                const feeDetails = result.recordset[0];
+                let status;
+                if (feeDetails.PaidAmount >= feeDetails.TotalFee) {
+                    status = 'Paid';
+                } else if (feeDetails.PaidAmount > 0) {
+                    status = 'Partially Paid';
+                } else {
+                    status = 'Overdue';
+                }
+
+                const responseMessage = {
+                    StudentID: feeDetails.StudentID,
+                    name: feeDetails.Name,
+                    course: feeDetails.Course,
+                    totalAmount: feeDetails.TotalFee,
+                    paidAmount: feeDetails.PaidAmount,
+                    paymentStatus: status,
+                    email: feeDetails.Email,
+                    dueDate: feeDetails.DueDate
+                };
+
+                return {
+                    status: 200,
+                    body: JSON.stringify(responseMessage)
+                };
+            }
+
+            // Handle PUT request: Update only the PaidAmount for the StudentID
+            if (method === 'PUT') {
+                const { PaidAmount } = request.body;
+
+                // Validate that PaidAmount is present in the request body
+                if (PaidAmount == null) {
+                    context.log('Invalid input data for updating fee details.');
+                    return {
+                        status: 400,
+                        body: "Please provide PaidAmount in the request body."
+                    };
+                }
+
+                // Validate that PaidAmount is numeric
+                if (isNaN(PaidAmount)) {
+                    context.log('PaidAmount is not a valid number.');
+                    return {
+                        status: 400,
+                        body: "PaidAmount must be a valid number."
+                    };
+                }
+
+                // Check if the user is authorized (admin) to update the fee
+                const userRole = request.headers['x-ms-client-principal-role']; // Azure AD role
+                if (userRole !== 'Administrator') {
+                    return {
+                        status: 403,
+                        body: "Access Denied: You are not authorized to update fee records."
+                    };
+                }
+
+                // Proceed with updating only the PaidAmount for authorized users
+                const requestSql = new sql.Request(pool);
+                requestSql.input('StudentID', sql.Int, StudentID);
+                requestSql.input('PaidAmount', sql.Decimal, PaidAmount);
+
+                const updateQuery = `
+                    UPDATE Students
+                    SET PaidAmount = @PaidAmount
+                    WHERE StudentID = @StudentID
+                `;
+                context.log('Executing update query:', updateQuery);
+
+                const result = await requestSql.query(updateQuery);
+
+                if (result.rowsAffected[0] === 0) {
+                    context.log('No records updated for StudentID:', StudentID);
+                    return {
+                        status: 404,
+                        body: "No records found for the given StudentID to update."
+                    };
+                }
+
+                context.log('Fee record updated successfully.');
+                return {
+                    status: 200,
+                    body: `PaidAmount updated for StudentID: ${StudentID}`
+                };
+            }
+
+        } catch (err) {
+            console.error('Error occurred:', err.message);
+            return {
+                status: 500,
+                body: `Internal server error: ${err.message}`
+            };
+        } finally {
+            // Close database connection
+            if (pool && pool.close) {
+                await pool.close();
+                context.log('Database connection closed.');
+            }
+        }
+    }
+});
