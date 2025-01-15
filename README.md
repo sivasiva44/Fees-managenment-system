@@ -23,7 +23,8 @@ The solution uses Azure services to ensure scalability, security, and automation
 5. **Azure Active Directory (AD)**: Manages role-based access control (RBAC) to secure access for students and admins.
 
 ## Architecture Diagram
-_Include your architecture diagram here._
+![image](https://github.com/user-attachments/assets/aefc013e-674b-4752-9128-dc4287a5a67c)
+
 
 ## Steps
 
@@ -40,6 +41,8 @@ Create a **Logic App** to send fee reminders:
 2. **Execute SQL query**: Query overdue students.
 3. **For each student**: Loop through results.
 4. **Send Email**: Send reminders using Outlook or SendGrid.
+   ![image](https://github.com/user-attachments/assets/136ab075-81bf-44a6-93c6-f92b26cc101d)
+
 
 #### Example Logic App Workflow:
 - Trigger: Runs daily.
@@ -76,6 +79,9 @@ Admins can securely update student fee records using an API protected by **Azure
       "PaidAmount": 9000
     }
     ```
+
+
+    ![image](https://github.com/user-attachments/assets/c0235c9c-fcbd-41cf-96e1-282f8996d6f7)
 
 The system checks the admin's role through Azure AD before performing the update.
 
